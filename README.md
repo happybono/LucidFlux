@@ -5,7 +5,7 @@ It supports drag-and-drop / paste of text or files containing point data, then c
 ## Features
 - Drag & drop point data onto the list
 - Paste point data via `Ctrl + V`
-- Accepts plain numeric text or delimited text (CSV/TSV/semicolon)
+- Accepts plain numeric text or delimited text (CSV / TSV / semicolon)
 - Optional timestamp parsing enables time-window evaluation modes
 - Displays:
   - Centroid `(meanX, meanY)`
