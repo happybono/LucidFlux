@@ -87,10 +87,10 @@ Given the selected subset of points:
 Angle units can be displayed in radians or degrees.
 
 ## Limits
-- Max stored points: **5000**
+- Max stored points : **5000**
 
 ## References
 > The UI label "Last 1000 values (ISO Standard)" suggests alignment with an ISO evaluation convention.
 
-- **ISO 11146 (series)** — Lasers and laser-related equipment — Test methods for laser beam widths, divergence angles and beam propagation ratios.
-- **ISO 11147 (series)** — Lasers and laser-related equipment — Test methods for laser beam parameters.
+- **ISO 11146 (series)** : Lasers and laser-related equipment — Test methods for laser beam widths, divergence angles and beam propagation ratios.
+- **ISO 11147 (series)** : Lasers and laser-related equipment — Test methods for laser beam parameters.
