@@ -24,9 +24,35 @@ It supports drag-and-drop / paste of text or files containing point data, then c
 <br>
 
 ## What's New
+<details>
+<summary>Click to Expand</summary>
+  
 ### v1.0.0.0
 #### January 04, 2026
 > Initial release.
+</details>
+
+### v2.0.0.0
+#### January 05, 2026
+> Added an Open menu action using `openCSVDialog` with a CSV-only filter (`*.csv`) and multi-select support.
+>   
+> Loading uses the same parsing flow as file drag-and-drop (`ReadAllText → ParsePointsFromText → AddPoints`).  
+>
+> Updated file-based loading (drag-and-drop `FileDrop` and Open menu) to clear existing points / ListView items on successful load, keeping only the newly loaded points.  
+>
+> Kept existing error handling : on load failure, show an error message and leave current data unchanged.  
+>
+> Updated **Excel export options and worksheet layout** :  
+>   - Added `chkOpenBeforeSave` ("Open and edit before saving") to allow opening the generated workbook in Excel without prompting for a save path.  
+>   - Excel is shown only after the user dismisses the "Excel export completed" dialog.  
+>   - Added `chkExportConsideredOnly` ("Export only considered") to export only the computed considered range instead of the full dataset.  
+>     (Main exported Index, Timestamp, X, Y columns respect this selection.)  
+>   - Added chart helper columns for the considered range, including an `Index (…)(Considered)` column plus `X (…)(Considered)` / `Y (…)(Considered)` columns.  
+>     These are ordered by timestamp when timestamps exist, and the chart uses these helper columns rather than the full dataset.  
+>
+> Restricted drag-and-drop inputs :  
+>   - `lvPoints` now accepts only plain text drops (`DataFormats.Text`) or file drops where all dropped files are `.csv`.  
+>   - Other file types are rejected at drag-enter and ignored at drop.
 
 ## Required Components & Setup
 - Target framework : **.NET Framework 4.8.1**
