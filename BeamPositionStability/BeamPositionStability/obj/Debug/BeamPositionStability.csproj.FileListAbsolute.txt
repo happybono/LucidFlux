@@ -8,3 +8,13 @@ C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.exe
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.pdb
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.FrmMain.resources
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\bin\Debug\BeamPositionStability.exe.config
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\bin\Debug\BeamPositionStability.exe
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\bin\Debug\BeamPositionStability.pdb
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.csproj.AssemblyReference.cache
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.FrmMain.resources
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.Properties.Resources.resources
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.csproj.GenerateResource.cache
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.csproj.CoreCompileInputs.cache
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.exe
+E:\My Lifestyle\Products\C#\LucidFlux\BeamPositionStability\BeamPositionStability\obj\Debug\BeamPositionStability.pdb

@@ -65,9 +65,17 @@
             this.rbtnMidTerm = new System.Windows.Forms.RadioButton();
             this.rbtnShortTerm = new System.Windows.Forms.RadioButton();
             this.groupBox1 = new System.Windows.Forms.GroupBox();
+            this.menuStrip1 = new System.Windows.Forms.MenuStrip();
+            this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.openCSVToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.openCSVDialog = new System.Windows.Forms.OpenFileDialog();
+            this.btnExport = new System.Windows.Forms.Button();
+            this.chkOpenBeforeSave = new System.Windows.Forms.CheckBox();
+            this.btnClear = new System.Windows.Forms.Button();
             this.gbUnits.SuspendLayout();
             this.gbSettings.SuspendLayout();
             this.groupBox1.SuspendLayout();
+            this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
             // lvPoints
@@ -83,9 +91,9 @@
             this.lvPoints.FullRowSelect = true;
             this.lvPoints.GridLines = true;
             this.lvPoints.HideSelection = false;
-            this.lvPoints.Location = new System.Drawing.Point(22, 23);
+            this.lvPoints.Location = new System.Drawing.Point(22, 47);
             this.lvPoints.Name = "lvPoints";
-            this.lvPoints.Size = new System.Drawing.Size(352, 567);
+            this.lvPoints.Size = new System.Drawing.Size(352, 511);
             this.lvPoints.TabIndex = 0;
             this.lvPoints.UseCompatibleStateImageBehavior = false;
             this.lvPoints.View = System.Windows.Forms.View.Details;
@@ -174,7 +182,7 @@
             this.gbUnits.Controls.Add(this.rbtnRad);
             this.gbUnits.Controls.Add(this.rbtnDeg);
             this.gbUnits.Font = new System.Drawing.Font("Segoe UI Variable Display Semib", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.gbUnits.Location = new System.Drawing.Point(410, 301);
+            this.gbUnits.Location = new System.Drawing.Point(410, 325);
             this.gbUnits.Name = "gbUnits";
             this.gbUnits.Size = new System.Drawing.Size(459, 90);
             this.gbUnits.TabIndex = 7;
@@ -319,9 +327,9 @@
             this.gbSettings.Controls.Add(this.rbtnMidTerm);
             this.gbSettings.Controls.Add(this.rbtnShortTerm);
             this.gbSettings.Font = new System.Drawing.Font("Segoe UI Variable Display Semib", 9.75F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.gbSettings.Location = new System.Drawing.Point(410, 400);
+            this.gbSettings.Location = new System.Drawing.Point(410, 424);
             this.gbSettings.Name = "gbSettings";
-            this.gbSettings.Size = new System.Drawing.Size(459, 190);
+            this.gbSettings.Size = new System.Drawing.Size(459, 198);
             this.gbSettings.TabIndex = 8;
             this.gbSettings.TabStop = false;
             this.gbSettings.Text = "Settings";
@@ -329,7 +337,7 @@
             // lblValues
             // 
             this.lblValues.AutoSize = true;
-            this.lblValues.Location = new System.Drawing.Point(348, 121);
+            this.lblValues.Location = new System.Drawing.Point(348, 126);
             this.lblValues.Name = "lblValues";
             this.lblValues.Size = new System.Drawing.Size(53, 17);
             this.lblValues.TabIndex = 10;
@@ -337,7 +345,7 @@
             // 
             // lblCustomSeqNumber
             // 
-            this.lblCustomSeqNumber.Location = new System.Drawing.Point(239, 118);
+            this.lblCustomSeqNumber.Location = new System.Drawing.Point(239, 123);
             this.lblCustomSeqNumber.Name = "lblCustomSeqNumber";
             this.lblCustomSeqNumber.Size = new System.Drawing.Size(100, 25);
             this.lblCustomSeqNumber.TabIndex = 9;
@@ -346,7 +354,7 @@
             // rbtnCustomSeq
             // 
             this.rbtnCustomSeq.AutoSize = true;
-            this.rbtnCustomSeq.Location = new System.Drawing.Point(239, 86);
+            this.rbtnCustomSeq.Location = new System.Drawing.Point(239, 91);
             this.rbtnCustomSeq.Name = "rbtnCustomSeq";
             this.rbtnCustomSeq.Size = new System.Drawing.Size(148, 21);
             this.rbtnCustomSeq.TabIndex = 8;
@@ -358,7 +366,7 @@
             // rbtn1000Values
             // 
             this.rbtn1000Values.AutoSize = true;
-            this.rbtn1000Values.Location = new System.Drawing.Point(239, 59);
+            this.rbtn1000Values.Location = new System.Drawing.Point(239, 64);
             this.rbtn1000Values.Name = "rbtn1000Values";
             this.rbtn1000Values.Size = new System.Drawing.Size(208, 21);
             this.rbtn1000Values.TabIndex = 7;
@@ -370,7 +378,7 @@
             // rbtnAllValues
             // 
             this.rbtnAllValues.AutoSize = true;
-            this.rbtnAllValues.Location = new System.Drawing.Point(239, 32);
+            this.rbtnAllValues.Location = new System.Drawing.Point(239, 37);
             this.rbtnAllValues.Name = "rbtnAllValues";
             this.rbtnAllValues.Size = new System.Drawing.Size(152, 21);
             this.rbtnAllValues.TabIndex = 6;
@@ -382,7 +390,7 @@
             // lblSeconds
             // 
             this.lblSeconds.AutoSize = true;
-            this.lblSeconds.Location = new System.Drawing.Point(140, 149);
+            this.lblSeconds.Location = new System.Drawing.Point(140, 154);
             this.lblSeconds.Name = "lblSeconds";
             this.lblSeconds.Size = new System.Drawing.Size(65, 17);
             this.lblSeconds.TabIndex = 5;
@@ -390,7 +398,7 @@
             // 
             // txtCustomTime
             // 
-            this.txtCustomTime.Location = new System.Drawing.Point(31, 146);
+            this.txtCustomTime.Location = new System.Drawing.Point(31, 151);
             this.txtCustomTime.Name = "txtCustomTime";
             this.txtCustomTime.Size = new System.Drawing.Size(100, 25);
             this.txtCustomTime.TabIndex = 4;
@@ -399,7 +407,7 @@
             // rbtnCustomTime
             // 
             this.rbtnCustomTime.AutoSize = true;
-            this.rbtnCustomTime.Location = new System.Drawing.Point(11, 113);
+            this.rbtnCustomTime.Location = new System.Drawing.Point(11, 118);
             this.rbtnCustomTime.Name = "rbtnCustomTime";
             this.rbtnCustomTime.Size = new System.Drawing.Size(132, 21);
             this.rbtnCustomTime.TabIndex = 3;
@@ -411,7 +419,7 @@
             // rbtnLongTerm
             // 
             this.rbtnLongTerm.AutoSize = true;
-            this.rbtnLongTerm.Location = new System.Drawing.Point(11, 86);
+            this.rbtnLongTerm.Location = new System.Drawing.Point(11, 91);
             this.rbtnLongTerm.Name = "rbtnLongTerm";
             this.rbtnLongTerm.Size = new System.Drawing.Size(198, 21);
             this.rbtnLongTerm.TabIndex = 2;
@@ -423,7 +431,7 @@
             // rbtnMidTerm
             // 
             this.rbtnMidTerm.AutoSize = true;
-            this.rbtnMidTerm.Location = new System.Drawing.Point(11, 59);
+            this.rbtnMidTerm.Location = new System.Drawing.Point(11, 64);
             this.rbtnMidTerm.Name = "rbtnMidTerm";
             this.rbtnMidTerm.Size = new System.Drawing.Size(186, 21);
             this.rbtnMidTerm.TabIndex = 1;
@@ -435,7 +443,7 @@
             // rbtnShortTerm
             // 
             this.rbtnShortTerm.AutoSize = true;
-            this.rbtnShortTerm.Location = new System.Drawing.Point(11, 32);
+            this.rbtnShortTerm.Location = new System.Drawing.Point(11, 37);
             this.rbtnShortTerm.Name = "rbtnShortTerm";
             this.rbtnShortTerm.Size = new System.Drawing.Size(194, 21);
             this.rbtnShortTerm.TabIndex = 0;
@@ -463,25 +471,94 @@
             this.groupBox1.Controls.Add(this.lblDelta);
             this.groupBox1.Controls.Add(this.label5);
             this.groupBox1.Font = new System.Drawing.Font("Segoe UI Variable Display Semib", 9.75F, System.Drawing.FontStyle.Bold);
-            this.groupBox1.Location = new System.Drawing.Point(410, 22);
+            this.groupBox1.Location = new System.Drawing.Point(410, 46);
             this.groupBox1.Name = "groupBox1";
             this.groupBox1.Size = new System.Drawing.Size(459, 270);
             this.groupBox1.TabIndex = 18;
             this.groupBox1.TabStop = false;
             this.groupBox1.Text = "Results";
             // 
+            // menuStrip1
+            // 
+            this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.fileToolStripMenuItem});
+            this.menuStrip1.Location = new System.Drawing.Point(0, 0);
+            this.menuStrip1.Name = "menuStrip1";
+            this.menuStrip1.Size = new System.Drawing.Size(904, 25);
+            this.menuStrip1.TabIndex = 19;
+            this.menuStrip1.Text = "menuStrip1";
+            // 
+            // fileToolStripMenuItem
+            // 
+            this.fileToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.openCSVToolStripMenuItem});
+            this.fileToolStripMenuItem.Font = new System.Drawing.Font("Segoe UI Variable Display", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
+            this.fileToolStripMenuItem.Size = new System.Drawing.Size(39, 21);
+            this.fileToolStripMenuItem.Text = "File";
+            // 
+            // openCSVToolStripMenuItem
+            // 
+            this.openCSVToolStripMenuItem.Name = "openCSVToolStripMenuItem";
+            this.openCSVToolStripMenuItem.Size = new System.Drawing.Size(157, 22);
+            this.openCSVToolStripMenuItem.Text = "Open CSV File";
+            this.openCSVToolStripMenuItem.Click += new System.EventHandler(this.openCSVFileToolStripMenuItem_Click);
+            // 
+            // openCSVDialog
+            // 
+            this.openCSVDialog.FileName = "openFileDialog1";
+            // 
+            // btnExport
+            // 
+            this.btnExport.Font = new System.Drawing.Font("Segoe Fluent Icons", 14.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.btnExport.Location = new System.Drawing.Point(22, 565);
+            this.btnExport.Name = "btnExport";
+            this.btnExport.Size = new System.Drawing.Size(244, 30);
+            this.btnExport.TabIndex = 26;
+            this.btnExport.Text = "";
+            this.btnExport.UseVisualStyleBackColor = true;
+            this.btnExport.Click += new System.EventHandler(this.btnExport_Click);
+            // 
+            // chkOpenBeforeSave
+            // 
+            this.chkOpenBeforeSave.AutoSize = true;
+            this.chkOpenBeforeSave.Font = new System.Drawing.Font("Segoe UI Variable Display", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.chkOpenBeforeSave.Location = new System.Drawing.Point(22, 601);
+            this.chkOpenBeforeSave.Name = "chkOpenBeforeSave";
+            this.chkOpenBeforeSave.Size = new System.Drawing.Size(190, 21);
+            this.chkOpenBeforeSave.TabIndex = 27;
+            this.chkOpenBeforeSave.Text = "Open and edit before saving";
+            this.chkOpenBeforeSave.UseVisualStyleBackColor = true;
+            // 
+            // btnClear
+            // 
+            this.btnClear.Font = new System.Drawing.Font("Segoe Fluent Icons", 12.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.btnClear.Location = new System.Drawing.Point(271, 565);
+            this.btnClear.Margin = new System.Windows.Forms.Padding(2);
+            this.btnClear.Name = "btnClear";
+            this.btnClear.Size = new System.Drawing.Size(103, 30);
+            this.btnClear.TabIndex = 28;
+            this.btnClear.Text = "";
+            this.btnClear.UseVisualStyleBackColor = true;
+            this.btnClear.Click += new System.EventHandler(this.btnClear_Click);
+            // 
             // FrmMain
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = System.Drawing.Color.White;
-            this.ClientSize = new System.Drawing.Size(904, 613);
+            this.ClientSize = new System.Drawing.Size(904, 645);
+            this.Controls.Add(this.btnClear);
+            this.Controls.Add(this.chkOpenBeforeSave);
+            this.Controls.Add(this.btnExport);
             this.Controls.Add(this.gbSettings);
             this.Controls.Add(this.gbUnits);
             this.Controls.Add(this.lvPoints);
             this.Controls.Add(this.groupBox1);
+            this.Controls.Add(this.menuStrip1);
             this.ForeColor = System.Drawing.Color.Black;
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+            this.MainMenuStrip = this.menuStrip1;
             this.MaximizeBox = false;
             this.Name = "FrmMain";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -492,7 +569,10 @@
             this.gbSettings.ResumeLayout(false);
             this.gbSettings.PerformLayout();
             this.groupBox1.ResumeLayout(false);
+            this.menuStrip1.ResumeLayout(false);
+            this.menuStrip1.PerformLayout();
             this.ResumeLayout(false);
+            this.PerformLayout();
 
         }
 
@@ -535,6 +615,13 @@
         private System.Windows.Forms.TextBox lblCustomSeqNumber;
         private System.Windows.Forms.RadioButton rbtnCustomSeq;
         private System.Windows.Forms.GroupBox groupBox1;
+        private System.Windows.Forms.MenuStrip menuStrip1;
+        private System.Windows.Forms.ToolStripMenuItem fileToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem openCSVToolStripMenuItem;
+        private System.Windows.Forms.OpenFileDialog openCSVDialog;
+        private System.Windows.Forms.Button btnExport;
+        private System.Windows.Forms.CheckBox chkOpenBeforeSave;
+        private System.Windows.Forms.Button btnClear;
     }
 }
 
