@@ -8,3 +8,23 @@ C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.exe
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.pdb
 C:\Users\HappyBono\source\repos\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.FrmMain.resources
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.exe.config
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.exe
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.pdb
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.AssemblyReference.cache
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.FrmMain.resources
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.Properties.Resources.resources
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.GenerateResource.cache
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.CoreCompileInputs.cache
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.exe
+E:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.pdb
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.exe.config
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.exe
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\bin\Release\BeamPositionStability.pdb
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.AssemblyReference.cache
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.FrmMain.resources
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.Properties.Resources.resources
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.GenerateResource.cache
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.csproj.CoreCompileInputs.cache
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.exe
+D:\My Lifestyle\Products\C#\LucieFlux\BeamPositionStability\BeamPositionStability\obj\Release\BeamPositionStability.pdb

@@ -1,4 +1,5 @@
-﻿using System;
+using Microsoft.Office.Interop.Excel;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -6,7 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace BeamPositionStability
@@ -19,11 +23,31 @@ namespace BeamPositionStability
         private const long MicrosecPerSecond = 1_000_000;
         private const long TicksPerMicrosec = 10; // 1 tick = 100 ns
 
+        private const int ExcelMaxRows = 1_048_576;
+        private const int ExcelDataStartRow = 4;
+
+        private int _lastProgressValue;
+        private int _progressGeneration;
+        private int _activeProgressGeneration;
+
+        private const int ProgressResetDelayMs = 150;
+
         // private readonly List<PointD> _points = new List<PointD>(5000);
         private readonly List<PointD> _points = new List<PointD>();
 
         private double[] _xpCache = Array.Empty<double>();
         private double[] _ypCache = Array.Empty<double>();
+
+        private double dpiX;
+        private double dpiY;
+
+        private CancellationTokenSource _ctsWork;
+
+        private const string DefaultGuideText =
+            "To start, add data (drag and drop a CSV file, paste, or open a file), then choose evaluation settings. Results update automatically.";
+
+        private const string DefaultGuideTextNoData =
+            "No data loaded. Add data (drag and drop a CSV file, paste, or open a file). Results update automatically.";
 
         private void EnsureCacheCapacity(int needed)
         {
@@ -38,6 +62,173 @@ namespace BeamPositionStability
         {
             InitializeComponent();
         }
+
+        private void FrmMain_Load(object sender, EventArgs e)
+        {
+            using (Graphics g = this.CreateGraphics())
+            {
+                dpiX = g.DpiX;
+                dpiY = g.DpiY;
+            }
+
+            pbMain.Size = new Size(
+                (int)(1001 * dpiX / 96),
+                (int)(5 * dpiY / 96)
+            );
+
+            slblDesc.Size = new Size(
+                (int)(1000 * dpiX / 96),
+                (int)(19 * dpiY / 96)
+            );
+
+            AutoFitColumns();
+
+            if (!rbtnShortTerm.Checked && !rbtnMidTerm.Checked && !rbtnLongTerm.Checked && !rbtnCustomTime.Checked
+                && !rbtnAllValues.Checked && !rbtn1000Values.Checked && !rbtnCustomSeq.Checked)
+            {
+                rbtn1000Values.Checked = true;
+            }
+
+            rbtnRad.Checked = true;
+            chkOpenBeforeSave.Checked = true;
+
+            txtCustomTime.Enabled = false;
+            lblSeconds.Enabled = false;
+
+            lblCustomSeqNumber.Enabled = false;
+            lblValues.Enabled = false;
+
+            ToggleTimeCtrls();
+            Recalculate();
+        }
+
+        #region Shared Progress Infrastructure
+
+        private IProgress<int> CreateUiProgress(int generation)
+        {
+            return new Progress<int>(p =>
+            {
+                if (_activeProgressGeneration != generation)
+                    return;
+
+                if (p < 0) p = 0;
+                if (p > 100) p = 100;
+
+                _lastProgressValue = p;
+
+                pbMain.Style = ProgressBarStyle.Continuous;
+                pbMain.Minimum = 0;
+                pbMain.Maximum = 100;
+                pbMain.Value = p;
+            });
+        }
+
+        private void ResetProgress()
+        {
+            pbMain.Style = ProgressBarStyle.Continuous;
+            pbMain.Minimum = 0;
+            pbMain.Maximum = 100;
+            pbMain.Value = 0;
+        }
+
+        private void CancelCurrentWork()
+        {
+            try { _ctsWork?.Cancel(); } catch { /* ignore */ }
+            _ctsWork?.Dispose();
+            _ctsWork = new CancellationTokenSource();
+        }
+
+        private Task<T> RunStaWithProgressAsync<T>(Func<CancellationToken, IProgress<int>, T> work, CancellationToken token, IProgress<int> progress)
+        {
+            var tcs = new TaskCompletionSource<T>();
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    var result = work(token, progress);
+                    tcs.TrySetResult(result);
+                }
+                catch (OperationCanceledException oce)
+                {
+                    tcs.TrySetCanceled(oce.CancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+
+            thread.IsBackground = true;
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+
+            return tcs.Task;
+        }
+
+        private async Task RunWithProgressAsync(Func<CancellationToken, IProgress<int>, Task> work, bool resetAfter = true)
+        {
+            CancelCurrentWork();
+            var token = _ctsWork.Token;
+
+            _lastProgressValue = 0;
+
+            int myGen = Interlocked.Increment(ref _progressGeneration);
+            _activeProgressGeneration = myGen;
+
+            var progress = CreateUiProgress(myGen);
+            progress.Report(0);
+
+            try
+            {
+                await work(token, progress).ConfigureAwait(true);
+            }
+            finally
+            {
+                if (resetAfter)
+                {
+                    await Task.Yield();
+
+                    pbMain.Refresh();
+                    await Task.Delay(ProgressResetDelayMs).ConfigureAwait(true);
+
+                    if (_activeProgressGeneration == myGen)
+                        ResetProgress();
+                }
+            }
+        }
+
+        private Task RunStaWithProgressAsync(Action<CancellationToken, IProgress<int>> work, CancellationToken token, IProgress<int> progress)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    work(token, progress);
+                    tcs.TrySetResult(true);
+                }
+                catch (OperationCanceledException oce)
+                {
+                    tcs.TrySetCanceled(oce.CancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+
+            thread.IsBackground = true;
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+
+            return tcs.Task;
+        }
+
+        #endregion
+
+        #region Drag & Drop (Async + Progress)
 
         private void lvPoints_DragEnter(object sender, DragEventArgs e)
         {
@@ -60,45 +251,73 @@ namespace BeamPositionStability
             e.Effect = DragDropEffects.None;
         }
 
-        private void lvPoints_DragDrop(object sender, DragEventArgs e)
+        private async void lvPoints_DragDrop(object sender, DragEventArgs e)
         {
-            try
+            await RunWithProgressAsync(async (token, progress) =>
             {
-                var newPoints = new List<PointD>();
-
-                if (e.Data.GetDataPresent(DataFormats.Text))
+                try
                 {
-                    string text = (string)e.Data.GetData(DataFormats.Text);
-                    newPoints.AddRange(ParsePointsFromText(text));
-                }
-                else if (e.Data.GetDataPresent(DataFormats.FileDrop))
-                {
-                    var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                    var newPoints = await Task.Run(() =>
+                    {
+                        token.ThrowIfCancellationRequested();
 
-                    // only accept .csv files.
-                    if (!files.All(f => string.Equals(Path.GetExtension(f), ".csv", StringComparison.OrdinalIgnoreCase)))
+                        if (e.Data.GetDataPresent(DataFormats.Text))
+                        {
+                            string text = (string)e.Data.GetData(DataFormats.Text);
+                            return ParsePointsFromTextParallelOrdered(text, token, progress);
+                        }
+
+                        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+                        {
+                            var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+
+                            // only accept .csv files.
+                            if (!files.All(f => string.Equals(Path.GetExtension(f), ".csv", StringComparison.OrdinalIgnoreCase)))
+                                return new List<PointD>();
+
+                            var all = new List<PointD>();
+                            for (int i = 0; i < files.Length; i++)
+                            {
+                                token.ThrowIfCancellationRequested();
+
+                                // scale file progress to 0 .. 30
+                                progress.Report(Math.Min(30, (int)Math.Round(30.0 * (i + 1) / files.Length)));
+
+                                string text = File.ReadAllText(files[i]);
+                                // parsing progress will do 0 .. 100; map it to 30 .. 95
+                                var subProgress = new Progress<int>(p =>
+                                    progress.Report(30 + (int)Math.Round(65.0 * p / 100.0)));
+
+                                all.AddRange(ParsePointsFromTextParallelOrdered(text, token, subProgress));
+                            }
+                            return all;
+                        }
+
+                        return new List<PointD>();
+                    }, token).ConfigureAwait(true);
+
+                    if (token.IsCancellationRequested)
                         return;
 
-                    foreach (var file in files)
-                    {
-                        string text = File.ReadAllText(file);
-                        newPoints.AddRange(ParsePointsFromText(text));
-                    }
-
-                    if (newPoints.Count > 0)
+                    // Original behavior: on file drop, if any points loaded, clear existing before add.
+                    if (e.Data.GetDataPresent(DataFormats.FileDrop) && newPoints.Count > 0)
                         _points.Clear();
+
+                    AddPoints(newPoints);
+
+                    // Show FitColumns as progress 96 .. 100
+                    FitColumns(progress);
                 }
-
-                AddPoints(newPoints);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "DragDrop Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-
-            FitColumns();
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, ex.Message, "DragDrop Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            });
         }
+
+        #endregion
+
+        #region Add / Update UI
 
         private void AddPoints(IEnumerable<PointD> points)
         {
@@ -114,20 +333,26 @@ namespace BeamPositionStability
         private void UpdateListView()
         {
             lvPoints.BeginUpdate();
-            lvPoints.Items.Clear();
-
-            for (int i = 0; i < _points.Count; i++)
+            try
             {
-                var p = _points[i];
+                lvPoints.Items.Clear();
 
-                var item = new ListViewItem((i + 1).ToString());
-                item.SubItems.Add(p.TimestampText ?? string.Empty);
-                item.SubItems.Add(p.X.ToString("G17", CultureInfo.InvariantCulture));
-                item.SubItems.Add(p.Y.ToString("G17", CultureInfo.InvariantCulture));
-                lvPoints.Items.Add(item);
+                for (int i = 0; i < _points.Count; i++)
+                {
+                    var p = _points[i];
+
+                    var item = new ListViewItem((i + 1).ToString());
+                    item.SubItems.Add(p.TimestampText ?? string.Empty);
+                    item.SubItems.Add(p.X.ToString("G17", CultureInfo.InvariantCulture));
+                    item.SubItems.Add(p.Y.ToString("G17", CultureInfo.InvariantCulture));
+                    lvPoints.Items.Add(item);
+                }
+            }
+            finally
+            {
+                lvPoints.EndUpdate();
             }
 
-            lvPoints.EndUpdate();
             UpdateUI();
         }
 
@@ -136,28 +361,39 @@ namespace BeamPositionStability
             Text = $"Beam Stability Demo - Points : {_points.Count}";
         }
 
-        private IEnumerable<PointD> ParsePointsFromText(string text)
+        #endregion
+
+        #region Parsing (Parallel.For + stable order)
+
+        private static List<PointD> ParsePointsFromTextParallelOrdered(string text, CancellationToken token, IProgress<int> progress)
         {
             if (string.IsNullOrWhiteSpace(text))
-                yield break;
+                return new List<PointD>();
 
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length == 0)
+                return new List<PointD>();
 
+            // Identify first header line like the original flow.
             bool csvMode = false;
             char csvDelimiter = ',';
             int tsCol = -1;
             int xCol = -1;
             int yCol = -1;
 
-            foreach (var rawLine in lines)
+            int headerIndex = -1;
+
+            for (int i = 0; i < lines.Length; i++)
             {
-                var line = rawLine.Trim();
+                token.ThrowIfCancellationRequested();
+
+                string line = lines[i].Trim();
                 if (line.Length == 0)
                     continue;
 
                 line = line.TrimStart('\uFEFF');
 
-                if (!csvMode && DetectHeaderLine(line))
+                if (DetectHeaderLine(line))
                 {
                     csvDelimiter = DetectDelimiter(line);
                     var headerCols = SplitDelimitedLine(line, csvDelimiter);
@@ -167,17 +403,41 @@ namespace BeamPositionStability
                     yCol = FindYColumnIndex(headerCols);
 
                     csvMode = true;
-                    continue;
+                    headerIndex = i;
+                    break;
                 }
+            }
 
-                if (csvMode)
+            var perLine = new List<PointD>[lines.Length];
+
+            int processed = 0;
+            int reportInterval = Math.Max(1, lines.Length / 100);
+
+            Parallel.For(0, lines.Length, new ParallelOptions
+            {
+                CancellationToken = token,
+                MaxDegreeOfParallelism = Environment.ProcessorCount
+            }, i =>
+            {
+                string rawLine = lines[i];
+                if (rawLine == null)
+                    return;
+
+                string line = rawLine.Trim();
+                if (line.Length == 0)
+                    return;
+
+                line = line.TrimStart('\uFEFF');
+
+                // skip header line if found
+                if (csvMode && i == headerIndex)
+                    return;
+
+                if (csvMode && headerIndex >= 0 && i > headerIndex)
                 {
                     var cols = SplitDelimitedLine(line, csvDelimiter);
                     if (TryParsePointFromColumns(cols, tsCol, xCol, yCol, out PointD p))
-                    {
-                        yield return p;
-                        continue;
-                    }
+                        perLine[i] = new List<PointD>(1) { p };
                 }
                 else
                 {
@@ -187,15 +447,34 @@ namespace BeamPositionStability
                         var cols = SplitDelimitedLine(line, candidateDelimiter);
                         if (TryParsePointFromColumns(cols, -1, -1, -1, out PointD p))
                         {
-                            yield return p;
-                            continue;
+                            perLine[i] = new List<PointD>(1) { p };
+                            goto Report;
                         }
                     }
+
+                    if (TryParseXY(line, out double x, out double y))
+                        perLine[i] = new List<PointD>(1) { new PointD(null, null, x, y) };
                 }
 
-                if (TryParseXY(line, out double x, out double y))
-                    yield return new PointD(timestampMicroseconds: null, timestampText: null, x: x, y: y);
+            Report:
+                int done = Interlocked.Increment(ref processed);
+                if (progress != null && (done % reportInterval) == 0)
+                {
+                    int pct = (int)Math.Round(100.0 * done / lines.Length);
+                    progress.Report(pct);
+                }
+            });
+
+            var result = new List<PointD>();
+            for (int i = 0; i < perLine.Length; i++)
+            {
+                var list = perLine[i];
+                if (list != null && list.Count > 0)
+                    result.AddRange(list);
             }
+
+            progress?.Report(100);
+            return result;
         }
 
         private static bool DetectHeaderLine(string line)
@@ -348,45 +627,9 @@ namespace BeamPositionStability
             return result;
         }
 
-        private bool TryGetSelectedWindowMicrosec(out long windowMicroseconds)
-        {
-            windowMicroseconds = 0;
+        #endregion
 
-            if (rbtnShortTerm.Checked)
-            {
-                windowMicroseconds = 1L * MicrosecPerSecond;
-                return true;
-            }
-
-            if (rbtnMidTerm.Checked)
-            {
-                windowMicroseconds = 60L * MicrosecPerSecond;
-                return true;
-            }
-
-            if (rbtnLongTerm.Checked)
-            {
-                windowMicroseconds = 3600L * MicrosecPerSecond;
-                return true;
-            }
-
-            if (rbtnCustomTime.Checked)
-            {
-                if (!double.TryParse(txtCustomTime.Text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out double seconds)
-                    && !double.TryParse(txtCustomTime.Text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out seconds))
-                {
-                    return false;
-                }
-
-                if (seconds <= 0)
-                    return false;
-
-                windowMicroseconds = (long)Math.Round(seconds * MicrosecPerSecond, MidpointRounding.AwayFromZero);
-                return windowMicroseconds > 0;
-            }
-
-            return false;
-        }
+        #region Parsing helpers (unchanged)
 
         private static bool TryParsePointFromColumns(IReadOnlyList<string> cols, int tsCol, int xCol, int yCol, out PointD p)
         {
@@ -658,6 +901,10 @@ namespace BeamPositionStability
             return false;
         }
 
+        #endregion
+
+        #region Calculation
+
         private void Recalculate()
         {
             int total = _points.Count;
@@ -792,6 +1039,10 @@ namespace BeamPositionStability
             return Math.Sqrt(sumSq / (count - 1));
         }
 
+        #endregion
+
+        #region Considered range / Settings handlers
+
         private void GetConsideredRange(int total, out int start, out int considered)
         {
             start = 0;
@@ -907,8 +1158,10 @@ namespace BeamPositionStability
             rbtnMidTerm.Enabled = hasAnyTimestamp;
             rbtnLongTerm.Enabled = hasAnyTimestamp;
             rbtnCustomTime.Enabled = hasAnyTimestamp;
-            txtCustomTime.Enabled = hasAnyTimestamp;
-            lblSeconds.Enabled = hasAnyTimestamp;
+
+            bool enableCustomTimeInput = hasAnyTimestamp && rbtnCustomTime.Checked;
+            txtCustomTime.Enabled = enableCustomTimeInput;
+            lblSeconds.Enabled = enableCustomTimeInput;
 
             if (!hasAnyTimestamp)
             {
@@ -933,32 +1186,8 @@ namespace BeamPositionStability
             lblConsidered.ForeColor = c;
         }
 
-        private void rbtnDeg_CheckedChanged(object sender, EventArgs e)
-        {
-            Recalculate();
-        }
-
-        private void rbtnRad_CheckedChanged(object sender, EventArgs e)
-        {
-            Recalculate();
-        }
-
-        private void FrmMain_Load(object sender, EventArgs e)
-        {
-            AutoFitColumns();
-
-            if (!rbtnShortTerm.Checked && !rbtnMidTerm.Checked && !rbtnLongTerm.Checked && !rbtnCustomTime.Checked
-                && !rbtnAllValues.Checked && !rbtn1000Values.Checked && !rbtnCustomSeq.Checked)
-            {
-                rbtn1000Values.Checked = true;
-            }
-
-            rbtnRad.Checked = true;
-            chkOpenBeforeSave.Checked = true;
-
-            ToggleTimeCtrls();
-            Recalculate();
-        }
+        private void rbtnDeg_CheckedChanged(object sender, EventArgs e) => Recalculate();
+        private void rbtnRad_CheckedChanged(object sender, EventArgs e) => Recalculate();
 
         private void SettingsChanged(object sender, EventArgs e)
         {
@@ -966,17 +1195,69 @@ namespace BeamPositionStability
             Recalculate();
         }
 
-        private void FitColumns()
+        private bool TryGetSelectedWindowMicrosec(out long windowMicroseconds)
         {
+            windowMicroseconds = 0;
+
+            if (rbtnShortTerm.Checked)
+            {
+                windowMicroseconds = 1L * MicrosecPerSecond;
+                return true;
+            }
+
+            if (rbtnMidTerm.Checked)
+            {
+                windowMicroseconds = 60L * MicrosecPerSecond;
+                return true;
+            }
+
+            if (rbtnLongTerm.Checked)
+            {
+                windowMicroseconds = 3600L * MicrosecPerSecond;
+                return true;
+            }
+
+            if (rbtnCustomTime.Checked)
+            {
+                if (!double.TryParse(txtCustomTime.Text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out double seconds)
+                    && !double.TryParse(txtCustomTime.Text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out seconds))
+                {
+                    return false;
+                }
+
+                if (seconds <= 0)
+                    return false;
+
+                windowMicroseconds = (long)Math.Round(seconds * MicrosecPerSecond, MidpointRounding.AwayFromZero);
+                return windowMicroseconds > 0;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        #region ListView column helpers
+
+        private void FitColumns(IProgress<int> progress)
+        {
+            // Start column fitting
+            progress?.Report(96);
+
             lvPoints.BeginUpdate();
             try
             {
+                // AutoResizeColumns has high performance overhead internally, so progress is incremented midway for better perception
+                progress?.Report(98);
                 lvPoints.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
             }
             finally
             {
                 lvPoints.EndUpdate();
             }
+
+            // Column fitting completed
+            progress?.Report(100);
         }
 
         private void AutoFitColumns()
@@ -985,62 +1266,74 @@ namespace BeamPositionStability
                 col.Width = -2;
         }
 
-        private void lvPoints_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Control && e.KeyCode == Keys.V)
-            {
-                e.Handled = true;
-                e.SuppressKeyPress = true;
+        #endregion
 
+        #region Clipboard Paste (Async + Progress)
+
+        private async void lvPoints_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (!(e.Control && e.KeyCode == Keys.V))
+                return;
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            await RunWithProgressAsync(async (token, progress) =>
+            {
                 try
                 {
-                    var newPoints = new List<PointD>();
+                    var newPoints = await Task.Run(() =>
+                    {
+                        token.ThrowIfCancellationRequested();
 
-                    if (Clipboard.ContainsText())
-                    {
-                        string text = Clipboard.GetText();
-                        newPoints.AddRange(ParsePointsFromText(text));
-                    }
-                    else if (Clipboard.ContainsFileDropList())
-                    {
-                        var files = Clipboard.GetFileDropList();
-                        foreach (string file in files)
+                        var list = new List<PointD>();
+
+                        if (Clipboard.ContainsText())
                         {
-                            string text = File.ReadAllText(file);
-                            newPoints.AddRange(ParsePointsFromText(text));
+                            string text = Clipboard.GetText();
+                            list.AddRange(ParsePointsFromTextParallelOrdered(text, token, progress));
+                            return list;
                         }
-                    }
+
+                        if (Clipboard.ContainsFileDropList())
+                        {
+                            var files = Clipboard.GetFileDropList();
+                            for (int i = 0; i < files.Count; i++)
+                            {
+                                token.ThrowIfCancellationRequested();
+
+                                // file progress 0 .. 30
+                                progress.Report(Math.Min(30, (int)Math.Round(30.0 * (i + 1) / files.Count)));
+
+                                string text = File.ReadAllText(files[i]);
+                                var subProgress = new Progress<int>(p =>
+                                    progress.Report(30 + (int)Math.Round(65.0 * p / 100.0)));
+
+                                list.AddRange(ParsePointsFromTextParallelOrdered(text, token, subProgress));
+                            }
+                        }
+
+                        return list;
+                    }, token).ConfigureAwait(true);
 
                     if (newPoints.Count > 0)
                         AddPoints(newPoints);
+
+                    // Display FitColumns in the progress range 96 .. 100
+                    FitColumns(progress);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(this, ex.Message, "Paste Error",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(this, ex.Message, "Paste Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
-
-                FitColumns();
-            }
+            });
         }
 
-        private readonly struct PointD
-        {
-            public long? TimestampMicroseconds { get; }
-            public string TimestampText { get; }
-            public double X { get; }
-            public double Y { get; }
+        #endregion
 
-            public PointD(long? timestampMicroseconds, string timestampText, double x, double y)
-            {
-                TimestampMicroseconds = timestampMicroseconds;
-                TimestampText = timestampText;
-                X = x;
-                Y = y;
-            }
-        }
+        #region Open CSV (Async + Progress)
 
-        private void openCSVFileToolStripMenuItem_Click(object sender, EventArgs e)
+        private async void openCSVFileToolStripMenuItem_Click(object sender, EventArgs e)
         {
             openCSVDialog.Title = "Open CSV";
             openCSVDialog.Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
@@ -1052,82 +1345,236 @@ namespace BeamPositionStability
             openCSVDialog.RestoreDirectory = true;
 
             if (openCSVDialog.ShowDialog(this) != DialogResult.OK)
-            {
                 return;
-            }
 
-            try
+            await RunWithProgressAsync(async (token, progress) =>
             {
-                var newPoints = new List<PointD>();
-
-                foreach (string file in openCSVDialog.FileNames)
+                try
                 {
-                    string text = File.ReadAllText(file);
-                    newPoints.AddRange(ParsePointsFromText(text));
-                }
+                    var files = openCSVDialog.FileNames.ToArray();
 
-                if (newPoints.Count > 0)
+                    var newPoints = await Task.Run(() =>
+                    {
+                        var list = new List<PointD>();
+                        for (int i = 0; i < files.Length; i++)
+                        {
+                            token.ThrowIfCancellationRequested();
+
+                            // file progress 0 .. 30
+                            progress.Report(Math.Min(30, (int)Math.Round(30.0 * (i + 1) / files.Length)));
+
+                            string text = File.ReadAllText(files[i]);
+                            var subProgress = new Progress<int>(p =>
+                                progress.Report(30 + (int)Math.Round(65.0 * p / 100.0)));
+
+                            list.AddRange(ParsePointsFromTextParallelOrdered(text, token, subProgress));
+                        }
+                        return list;
+                    }, token).ConfigureAwait(true);
+
+                    if (newPoints.Count > 0)
+                    {
+                        _points.Clear();
+                        AddPoints(newPoints);
+                    }
+
+                    // Display FitColumns in the progress range 96 .. 100
+                    FitColumns(progress);
+                }
+                catch (Exception ex)
                 {
-                    _points.Clear();
-                    AddPoints(newPoints);
+                    MessageBox.Show(this, ex.Message, "Open Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Open Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-
-            FitColumns();
+            });
         }
+
+        #endregion
+
+        #region Export Excel (Async + STA + Progress)
 
         private void exportAsExcelToolStripMenuItem_Click(object sender, EventArgs e)
         {
             btnExport.PerformClick();
         }
 
-        private void btnExport_Click(object sender, EventArgs e)
+        private async void btnExport_Click(object sender, EventArgs e)
         {
+            btnExport.Enabled = false;
+            btnClear.Enabled = false;
+
             try
             {
-                ExportExcel();
-            }
-            catch (System.Runtime.InteropServices.COMException ex)
-            {
-                const int REGDB_E_CLASSNOTREG = unchecked((int)0x80040154);
-                if (ex.HResult == REGDB_E_CLASSNOTREG)
+                await RunWithProgressAsync(async (token, progress) =>
                 {
-                    var result = MessageBox.Show(
-                        this,
-                        "Microsoft Excel is not installed (or its COM registration is missing).\n\n" +
-                        "Would you like to open the Microsoft Office download page now?",
-                        "Excel Not Installed",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Warning,
-                        MessageBoxDefaultButton.Button2);
+                    try
+                    {
+                        await ExportExcelAsync(token, progress).ConfigureAwait(true);
+                    }
+                    catch (System.Runtime.InteropServices.COMException ex)
+                    {
+                        const int REGDB_E_CLASSNOTREG = unchecked((int)0x80040154);
+                        if (ex.HResult == REGDB_E_CLASSNOTREG)
+                        {
+                            var result = MessageBox.Show(
+                                this,
+                                "Microsoft Excel is not installed (or its COM registration is missing).\n\n" +
+                                "Would you like to open the Microsoft Office download page now?",
+                                "Excel Not Installed",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning,
+                                MessageBoxDefaultButton.Button2);
 
-                    if (result == DialogResult.Yes)
-                        OpenOfficeDownloadPage();
-                    return;
-                }
+                            if (result == DialogResult.Yes)
+                                OpenOfficeDownloadPage();
 
-                MessageBox.Show(this, "Excel export failed.\n\n" + ex.Message, "Export Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+
+                        MessageBox.Show(this, "Excel export failed.\n\n" + ex.Message, "Export Error",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, "An unexpected error occurred.\n\n" + ex.Message, "Export Error",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }).ConfigureAwait(true);
             }
-            catch (Exception ex)
+            finally
             {
-                MessageBox.Show(this, "An unexpected error occurred.\n\n" + ex.Message, "Export Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                btnExport.Enabled = true;
+                btnClear.Enabled = true;
             }
         }
 
-        private void ExportExcel()
+        private sealed class ExportSnapshot
+        {
+            public string TitleText { get; set; }
+            public string DateTimeText { get; set; }
+            public bool AllHaveTimestamp { get; set; }
+
+            public int ConsideredStart { get; set; }
+            public int ConsideredCount { get; set; }
+
+            public string UnitsText { get; set; }
+            public string SelectedSettingText { get; set; }
+
+            public string CentroidXText { get; set; }
+            public string CentroidYText { get; set; }
+            public string AzimuthText { get; set; }
+            public string DeltaXText { get; set; }
+            public string DeltaYText { get; set; }
+            public string DeltaText { get; set; }
+
+            public string TotalText { get; set; }
+            public string ConsideredText { get; set; }
+
+            public bool OpenAfterSave { get; set; }
+
+            public bool ShowExcelAfterCompletedMsg { get; set; }
+
+            public bool ExportConsideredOnly { get; set; }
+
+            public int DataStartIndex { get; set; }
+            public int NData { get; set; }
+
+            public string SavePath { get; set; }
+        }
+
+        private ExportSnapshot CaptureExportSnapshot()
+        {
+            var titleText = "Beam Position Stability";
+            var dateTimeText = DateTime.Now.ToString("G", CultureInfo.CurrentCulture);
+            bool hasAnyTimestampMissing = _points.Any(p => p.TimestampMicroseconds == null || string.IsNullOrWhiteSpace(p.TimestampText));
+            bool allHaveTimestamp = !hasAnyTimestampMissing;
+
+            GetConsideredRange(_points.Count, out int start, out int considered);
+
+            bool exportConsideredOnly = chkExportConsideredOnly.Checked;
+            int dataStartIndex = exportConsideredOnly ? start : 0;
+            int nData = exportConsideredOnly ? considered : _points.Count;
+
+            return new ExportSnapshot
+            {
+                TitleText = titleText,
+                DateTimeText = dateTimeText,
+                AllHaveTimestamp = allHaveTimestamp,
+
+                ConsideredStart = start,
+                ConsideredCount = considered,
+
+                UnitsText = rbtnDeg.Checked ? "Degrees" : "Radian",
+                SelectedSettingText = GetSelectedSettingsText(),
+
+                CentroidXText = lblCentroidX.Text,
+                CentroidYText = lblCentroidY.Text,
+                AzimuthText = lblAzimuth.Text,
+                DeltaXText = lblDeltaX.Text,
+                DeltaYText = lblDeltaY.Text,
+                DeltaText = lblDelta.Text,
+
+                TotalText = lblTotal.Text,
+                ConsideredText = lblConsidered.Text,
+
+                OpenAfterSave = chkOpenBeforeSave.Checked,
+                ShowExcelAfterCompletedMsg = chkOpenBeforeSave.Checked,
+                ExportConsideredOnly = exportConsideredOnly,
+
+                DataStartIndex = dataStartIndex,
+                NData = nData
+            };
+        }
+
+        private async Task ExportExcelAsync(CancellationToken token, IProgress<int> progress)
         {
             if (_points.Count == 0)
             {
                 MessageBox.Show(this, "No points to export.", "Export Excel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                progress.Report(100);
                 return;
             }
+
+            var snapshot = CaptureExportSnapshot();
+
+            if (!snapshot.OpenAfterSave)
+            {
+                using (var sfd = new SaveFileDialog
+                {
+                    Title = "Save Excel Workbook",
+                    Filter = "Excel Workbook (*.xlsx)|*.xlsx",
+                    FileName = "Beam Position Stability.xlsx",
+                    AddExtension = true,
+                    DefaultExt = "xlsx",
+                    OverwritePrompt = true
+                })
+                {
+                    if (sfd.ShowDialog(this) != DialogResult.OK)
+                        return;
+
+                    snapshot.SavePath = sfd.FileName;
+                }
+            }
+
+            progress.Report(5);
+
+            await RunStaWithProgressAsync((ct, prog) => ExportExcelCoreSta(snapshot, ct, prog, showExcel: false), token, progress)
+                .ConfigureAwait(true);
+
+            progress.Report(100);
+
+            MessageBox.Show(this, "Excel export completed.", "Export Excel",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            if (snapshot.ShowExcelAfterCompletedMsg)
+            {
+                await RunStaWithProgressAsync((ct, prog) => ExportExcelCoreSta(snapshot, ct, prog, showExcel: true), token, progress)
+                    .ConfigureAwait(true);
+            }
+        }
+
+        private void ExportExcelCoreSta(ExportSnapshot snapshot, CancellationToken token, IProgress<int> progress, bool showExcel)
+        {
+            token.ThrowIfCancellationRequested();
 
             void FinalRelease(object com)
             {
@@ -1144,51 +1591,38 @@ namespace BeamPositionStability
 
             void ReleaseAll(Stack<object> stack)
             {
-                while (stack.Count > 0) FinalRelease(stack.Pop());
+                while (stack.Count > 0)
+                    FinalRelease(stack.Pop());
             }
 
-            var titleText = $"Beam Position Stability - {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}";
-            bool hasAnyTimestampMissing = _points.Any(p => p.TimestampMicroseconds == null || string.IsNullOrWhiteSpace(p.TimestampText));
-            bool allHaveTimestamp = !hasAnyTimestampMissing;
+            int maxRowsPerColumn = ExcelMaxRows - (ExcelDataStartRow - 1);
 
-            GetConsideredRange(_points.Count, out int start, out int considered);
-
-            string selectedSettingText = GetSelectedSettingsText();
-
-            string centroidXText = lblCentroidX.Text;
-            string centroidYText = lblCentroidY.Text;
-            string azimuthText = lblAzimuth.Text;
-            string deltaXText = lblDeltaX.Text;
-            string deltaYText = lblDeltaY.Text;
-            string deltaText = lblDelta.Text;
-            string totalText = lblTotal.Text;
-            string consideredText = lblConsidered.Text;
-
-            bool openAfterSave = chkOpenBeforeSave.Checked;
-
-            string savePath = null;
-            if (!openAfterSave)
+            // During the showExcel step, the file is only opened in Excel
+            if (showExcel)
             {
-                using (var sfd = new SaveFileDialog
-                {
-                    Title = "Save Excel Workbook",
-                    Filter = "Excel Workbook (*.xlsx)|*.xlsx",
-                    FileName = "Beam Position Stability.xlsx",
-                    AddExtension = true,
-                    DefaultExt = "xlsx",
-                    OverwritePrompt = true
-                })
-                {
-                    if (sfd.ShowDialog(this) != DialogResult.OK)
-                        return;
+                if (string.IsNullOrWhiteSpace(snapshot.SavePath))
+                    return;
 
-                    savePath = sfd.FileName;
+                Excel.Application excelShow = null;
+                Excel.Workbooks wbsShow = null;
+                Excel.Workbook wbShow = null;
+
+                try
+                {
+                    excelShow = new Excel.Application();
+                    wbsShow = excelShow.Workbooks;
+                    wbShow = wbsShow.Open(snapshot.SavePath);
+
+                    excelShow.Visible = true;
                 }
-            }
+                finally
+                {
+                    // Excel이 열린 상태로 남아야 하므로 Workbook/Workbooks/Application RCW는 해제하지 않음
+                    // (해제하면 Excel이 닫히는 케이스가 있어 방치)
+                }
 
-            const int ExcelMaxRows = 1_048_576;
-            const int dataStartRow = 4;
-            int maxRowsPerColumn = ExcelMaxRows - (dataStartRow - 1);
+                return;
+            }
 
             var coms = new Stack<object>();
 
@@ -1205,6 +1639,8 @@ namespace BeamPositionStability
 
             try
             {
+                progress.Report(10);
+
                 excel = new Excel.Application();
                 coms.Push(excel);
 
@@ -1220,52 +1656,57 @@ namespace BeamPositionStability
                 ws = (Excel.Worksheet)sheets[1];
                 coms.Push(ws);
 
-                ws.Name = "Beam Position Stability";
+                ws.Name = snapshot.TitleText;
 
-                ws.Cells[1, 1] = titleText;
+                ws.Cells[1, 1] = snapshot.TitleText;
 
                 ws.Cells[3, 1] = "Settings";
-                ws.Cells[4, 1] = "Units : " + (rbtnDeg.Checked ? "Degrees" : "Radian");
-                ws.Cells[5, 1] = "Selection : " + selectedSettingText;
+                ws.Cells[4, 1] = "Units : " + snapshot.UnitsText;
+                ws.Cells[5, 1] = "Selection : " + snapshot.SelectedSettingText;
 
                 ws.Cells[7, 1] = "Results";
-                ws.Cells[8, 1] = "CentroidX : " + centroidXText;
-                ws.Cells[9, 1] = "CentroidY : " + centroidYText;
-                ws.Cells[10, 1] = "Azimuth : " + azimuthText;
-                ws.Cells[11, 1] = "DeltaX : " + deltaXText;
-                ws.Cells[12, 1] = "DeltaY : " + deltaYText;
-                ws.Cells[13, 1] = "Delta : " + deltaText;
+                ws.Cells[8, 1] = "CentroidX : " + snapshot.CentroidXText;
+                ws.Cells[9, 1] = "CentroidY : " + snapshot.CentroidYText;
+                ws.Cells[10, 1] = "Azimuth : " + snapshot.AzimuthText;
+                ws.Cells[11, 1] = "DeltaX : " + snapshot.DeltaXText;
+                ws.Cells[12, 1] = "DeltaY : " + snapshot.DeltaYText;
+                ws.Cells[13, 1] = "Delta : " + snapshot.DeltaText;
 
-                ws.Cells[14, 1] = "Count : " + totalText;
-                ws.Cells[15, 1] = "Count (Considered) : " + consideredText;
+                ws.Cells[14, 1] = "Count : " + snapshot.TotalText;
+                ws.Cells[15, 1] = "Count (Considered) : " + snapshot.ConsideredText;
+
+                ws.Cells[17, 1] = "Exported at : " + snapshot.DateTimeText;
+
+                progress.Report(20);
 
                 int baseCol = 3;
 
-                bool exportConsideredOnly = chkExportConsideredOnly.Checked;
-                int dataStartIndex = exportConsideredOnly ? start : 0;
-                int nData = exportConsideredOnly ? considered : _points.Count;
-
                 int indexStartCol = baseCol;
                 WriteColumnHeader(ws, indexStartCol, "Index");
-                int lastIndexCol = WriteIntColumn(ws, indexStartCol, dataStartRow, nData, maxRowsPerColumn, i => (dataStartIndex + i) + 1);
+                int lastIndexCol = WriteIntColumn(ws, indexStartCol, ExcelDataStartRow, snapshot.NData, maxRowsPerColumn, i => (snapshot.DataStartIndex + i) + 1);
+
+                progress.Report(35);
 
                 int timestampStartCol = lastIndexCol + 2;
                 WriteColumnHeader(ws, timestampStartCol, "Timestamp");
-                int lastTsCol = WriteStringColumn(ws, timestampStartCol, dataStartRow, nData, maxRowsPerColumn, i => _points[dataStartIndex + i].TimestampText ?? string.Empty);
+                int lastTsCol = WriteStringColumn(ws, timestampStartCol, ExcelDataStartRow, snapshot.NData, maxRowsPerColumn, i => _points[snapshot.DataStartIndex + i].TimestampText ?? string.Empty);
 
                 int xStartCol = lastTsCol + 2;
                 WriteColumnHeader(ws, xStartCol, "X");
-                int lastXCol = WriteDoubleColumn(ws, xStartCol, dataStartRow, nData, maxRowsPerColumn, i => _points[dataStartIndex + i].X);
+                int lastXCol = WriteDoubleColumn(ws, xStartCol, ExcelDataStartRow, snapshot.NData, maxRowsPerColumn, i => _points[snapshot.DataStartIndex + i].X);
 
                 int yStartCol = lastXCol + 2;
                 WriteColumnHeader(ws, yStartCol, "Y");
-                int lastYCol = WriteDoubleColumn(ws, yStartCol, dataStartRow, nData, maxRowsPerColumn, i => _points[dataStartIndex + i].Y);
+                int lastYCol = WriteDoubleColumn(ws, yStartCol, ExcelDataStartRow, snapshot.NData, maxRowsPerColumn, i => _points[snapshot.DataStartIndex + i].Y);
+
+                progress.Report(55);
 
                 // Chart helper columns are ALWAYS based on the considered range
-                int nChart = considered;
+                int nChart = snapshot.ConsideredCount;
+                int start = snapshot.ConsideredStart;
 
                 IEnumerable<int> order = Enumerable.Range(start, nChart);
-                if (allHaveTimestamp)
+                if (snapshot.AllHaveTimestamp)
                 {
                     order = order
                         .OrderBy(i => _points[i].TimestampMicroseconds.Value)
@@ -1286,24 +1727,26 @@ namespace BeamPositionStability
                 }
 
                 int helperIndexCol = lastYCol + 4;
-                WriteColumnHeader(ws, helperIndexCol, allHaveTimestamp ? "Index (ordered by Timestamp) (Considered)" : "Index (ordered by Index) (Considered)");
-                int lastHelperIndexCol = WriteObjectColumn(ws, helperIndexCol, dataStartRow, idxOrdered, nChart, maxRowsPerColumn);
+                WriteColumnHeader(ws, helperIndexCol, snapshot.AllHaveTimestamp ? "Index (ordered by Timestamp) (Considered)" : "Index (ordered by Index) (Considered)");
+                int lastHelperIndexCol = WriteObjectColumn(ws, helperIndexCol, ExcelDataStartRow, idxOrdered, nChart, maxRowsPerColumn);
 
                 int helperXCol = lastHelperIndexCol + 2;
-                WriteColumnHeader(ws, helperXCol, allHaveTimestamp ? "X (ordered by Timestamp) (Considered)" : "X (ordered by Index) (Considered)");
-                int lastHelperXCol = WriteObjectColumn(ws, helperXCol, dataStartRow, xOrdered, nChart, maxRowsPerColumn);
+                WriteColumnHeader(ws, helperXCol, snapshot.AllHaveTimestamp ? "X (ordered by Timestamp) (Considered)" : "X (ordered by Index) (Considered)");
+                int lastHelperXCol = WriteObjectColumn(ws, helperXCol, ExcelDataStartRow, xOrdered, nChart, maxRowsPerColumn);
 
                 int helperYCol = lastHelperXCol + 2;
-                WriteColumnHeader(ws, helperYCol, allHaveTimestamp ? "Y (ordered by Timestamp) (Considered)" : "Y (ordered by Index) (Considered)");
-                int lastHelperYCol = WriteObjectColumn(ws, helperYCol, dataStartRow, yOrdered, nChart, maxRowsPerColumn);
+                WriteColumnHeader(ws, helperYCol, snapshot.AllHaveTimestamp ? "Y (ordered by Timestamp) (Considered)" : "Y (ordered by Index) (Considered)");
+                int lastHelperYCol = WriteObjectColumn(ws, helperYCol, ExcelDataStartRow, yOrdered, nChart, maxRowsPerColumn);
+
+                progress.Report(70);
 
                 Excel.Range xUnion = null;
                 Excel.Range yUnion = null;
 
                 try
                 {
-                    xUnion = BuildDataUnionRange(excel, ws, dataStartRow, nChart, helperXCol, maxRowsPerColumn);
-                    yUnion = BuildDataUnionRange(excel, ws, dataStartRow, nChart, helperYCol, maxRowsPerColumn);
+                    xUnion = BuildDataUnionRange(excel, ws, ExcelDataStartRow, nChart, helperXCol, maxRowsPerColumn);
+                    yUnion = BuildDataUnionRange(excel, ws, ExcelDataStartRow, nChart, helperYCol, maxRowsPerColumn);
 
                     int chartColBase = lastHelperYCol + 4;
                     int chartRowBase = 4;
@@ -1332,7 +1775,7 @@ namespace BeamPositionStability
 
                     chart.ChartType = Excel.XlChartType.xlXYScatterLines;
                     chart.HasTitle = true;
-                    chart.ChartTitle.Text = titleText;
+                    chart.ChartTitle.Text = snapshot.TitleText;
 
                     chart.HasLegend = false;
 
@@ -1348,7 +1791,7 @@ namespace BeamPositionStability
                     var series = seriesCollection.NewSeries();
                     try
                     {
-                        series.Name = allHaveTimestamp ? "Trajectory (Timestamp order, Considered)" : "Trajectory (Index order, Considered)";
+                        series.Name = snapshot.AllHaveTimestamp ? "Trajectory (Timestamp order, Considered)" : "Trajectory (Index order, Considered)";
                         series.XValues = xUnion;
                         series.Values = yUnion;
                         series.MarkerStyle = Excel.XlMarkerStyle.xlMarkerStyleCircle;
@@ -1365,34 +1808,27 @@ namespace BeamPositionStability
                     FinalRelease(xUnion);
                 }
 
-                if (openAfterSave)
+                progress.Report(85);
+
+                if (string.IsNullOrWhiteSpace(snapshot.SavePath))
                 {
-                    wb.Saved = false;
-
-                    MessageBox.Show(this, "Excel export completed.", "Export Excel",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                    excel.Visible = true;
+                    snapshot.SavePath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                        "Beam Position Stability.xlsx");
                 }
-                else
-                {
-                    excel.DisplayAlerts = false;
-                    wb.SaveAs(savePath, Excel.XlFileFormat.xlOpenXMLWorkbook);
-                    wb.Saved = true;
 
-                    MessageBox.Show(this, "Excel export completed.", "Export Excel",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
+                excel.DisplayAlerts = false;
+                wb.SaveAs(snapshot.SavePath, Excel.XlFileFormat.xlOpenXMLWorkbook);
+                wb.Saved = true;
+
+                progress.Report(100);
             }
             finally
             {
-                try { excel.DisplayAlerts = true; } catch { /* ignore */ }
+                try { if (excel != null) excel.DisplayAlerts = true; } catch { /* ignore */ }
 
-                if (!openAfterSave)
-                {
-                    try { wb?.Close(false); } catch { /* ignore */ }
-                    try { excel?.Quit(); } catch { /* ignore */ }
-                }
+                try { wb?.Close(false); } catch { /* ignore */ }
+                try { excel?.Quit(); } catch { /* ignore */ }
 
                 ReleaseAll(coms);
 
@@ -1403,30 +1839,9 @@ namespace BeamPositionStability
             }
         }
 
-        private static void WriteObjectColumnNoSpill(Excel.Worksheet ws, int col, int startRow, object[,] values, int count)
-        {
-            if (count <= 0)
-                return;
+        #endregion
 
-            var arr = new object[count, 1];
-            for (int i = 0; i < count; i++)
-                arr[i, 0] = values[i, 0];
-
-            Excel.Range top = null, bottom = null, range = null;
-            try
-            {
-                top = (Excel.Range)ws.Cells[startRow, col];
-                bottom = (Excel.Range)ws.Cells[startRow + count - 1, col];
-                range = ws.Range[top, bottom];
-                range.Value2 = arr;
-            }
-            finally
-            {
-                if (range != null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(range);
-                if (bottom != null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(bottom);
-                if (top != null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(top);
-            }
-        }
+        #region Excel helper writers
 
         private static int WriteObjectColumn(Excel.Worksheet ws, int startCol, int startRow, object[,] values, int count, int maxRowsPerColumn)
         {
@@ -1626,6 +2041,10 @@ namespace BeamPositionStability
             return union;
         }
 
+        #endregion
+
+        #region Text helpers / Clear
+
         private string GetSelectedSettingsText()
         {
             if (rbtnAllValues.Checked)
@@ -1660,12 +2079,10 @@ namespace BeamPositionStability
             }
         }
 
-        private void btnClear_Click(object sender, EventArgs e)
+        private async void btnClear_Click(object sender, EventArgs e)
         {
             if (_points.Count <= 0)
-            {
                 return;
-            }
 
             var result = MessageBox.Show(
                 this,
@@ -1676,30 +2093,67 @@ namespace BeamPositionStability
                 MessageBoxDefaultButton.Button2);
 
             if (result != DialogResult.Yes)
-            {
                 return;
-            }
 
-            _points.Clear();
-
-            Array.Clear(_xpCache, 0, _xpCache.Length);
-            Array.Clear(_ypCache, 0, _ypCache.Length);
-
-            lvPoints.BeginUpdate();
-            try
+            await RunWithProgressAsync(async (token, progress) =>
             {
-                lvPoints.Items.Clear();
-                lvPoints.SelectedItems.Clear();
-            }
-            finally
-            {
-                lvPoints.EndUpdate();
-            }
+                token.ThrowIfCancellationRequested();
 
-            ToggleTimeCtrls();
-            Recalculate();
-            UpdateUI();
+                progress.Report(10);
+
+                _points.Clear();
+                progress.Report(30);
+
+                Array.Clear(_xpCache, 0, _xpCache.Length);
+                Array.Clear(_ypCache, 0, _ypCache.Length);
+                progress.Report(50);
+
+                lvPoints.BeginUpdate();
+                try
+                {
+                    lvPoints.Items.Clear();
+                    lvPoints.SelectedItems.Clear();
+                    progress.Report(80);
+                }
+                finally
+                {
+                    lvPoints.EndUpdate();
+                }
+
+                ToggleTimeCtrls();
+                progress.Report(90);
+
+                Recalculate();
+                UpdateUI();
+
+                // FitColumns도 진척도로 보여주기 (96~100)
+                FitColumns(progress);
+
+                await Task.CompletedTask.ConfigureAwait(true);
+            });
         }
+
+        #endregion
+
+        #region Data model
+
+        private readonly struct PointD
+        {
+            public long? TimestampMicroseconds { get; }
+            public string TimestampText { get; }
+            public double X { get; }
+            public double Y { get; }
+
+            public PointD(long? timestampMicroseconds, string timestampText, double x, double y)
+            {
+                TimestampMicroseconds = timestampMicroseconds;
+                TimestampText = timestampText;
+                X = x;
+                Y = y;
+            }
+        }
+
+        #endregion
 
         #region Event Handlers for Settings
         private void rbtnShortTerm_CheckedChanged(object sender, EventArgs e)
@@ -1739,6 +2193,17 @@ namespace BeamPositionStability
 
         private void rbtnCustomSeq_CheckedChanged(object sender, EventArgs e)
         {
+            if (rbtnCustomSeq.Checked)
+            {
+                lblCustomSeqNumber.Enabled = true;
+                lblValues.Enabled = true;
+            }
+            else
+            {
+                lblCustomSeqNumber.Enabled = false;
+                lblValues.Enabled = false;
+            }
+
             SettingsChanged(sender, e);
         }
 
@@ -1747,5 +2212,374 @@ namespace BeamPositionStability
             SettingsChanged(sender, e);
         }
         #endregion
+
+        #region Event Handlers for Guide Text
+        private void SetDefaultGuideText()
+        {
+            slblDesc.Text = (_points.Count > 0) ? DefaultGuideText : DefaultGuideTextNoData;
+        }
+
+        private void rbtnShortTerm_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within the last second of the measurement (short-term stability)";
+        }
+
+        private void rbtnShortTerm_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnMidTerm_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within the last minute of the measurement. (medium time span)";
+        }
+
+        private void rbtnMidTerm_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnLongTerm_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within the last hour of the measurement (long-term stability).";
+        }
+
+        private void rbtnLongTerm_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnAllValues_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all determined values for the evaluation.";
+        }
+
+        private void rbtnAllValues_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtn1000Values_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering the last 1000 determined values for the evaluation (as per ISO standard).";
+        }
+
+        private void rbtn1000Values_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnCustomTime_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within a user-defined period (activates Time edit control).";
+        }
+
+        private void rbtnCustomTime_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void txtCustomTime_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within a user-defined period (activates Time edit control).";
+        }
+
+        private void txtCustomTime_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblSeconds_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering all values within a user-defined period activates Time edit control).";
+        }
+
+        private void lblSeconds_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnCustomSeq_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering a user-defined number of the most recent values for the evaluation (activates Number label).";
+        }
+
+        private void rbtnCustomSeq_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblCustomSeqNumber_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering a user-defined number of the most recent values for the evaluation (activates Number label).";
+        }
+
+        private void lblCustomSeqNumber_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblValues_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Considering a user-defined number of the most recent values for the evaluation (activates Number label).";
+        }
+
+        private void lblValues_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void chkOpenBeforeSave_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Open the file for editing before saving.";
+        }
+
+        private void chkOpenBeforeSave_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void chkExportConsideredOnly_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Export only the data points that were considered in the stability evaluation based on the selected settings.";
+        }
+
+        private void chkExportConsideredOnly_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnDeg_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Azimuth angle displayed in degrees format.";
+        }
+
+        private void rbtnDeg_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void rbtnRad_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Azimuth angle displayed in radian format.";
+        }
+
+        private void rbtnRad_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTCentroidX_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "X coordinate of the centroid (mean position) of the considered points.";
+        }
+
+        private void lblTCentroidX_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblCentroidX_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "X coordinate of the centroid (mean position) of the considered points.";
+        }
+
+        private void lblCentroidX_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTCentroidY_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Y coordinate of the centroid (mean position) of the considered points.";
+        }
+
+        private void lblTCentroidY_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblCentroidY_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Y coordinate of the centroid (mean position) of the considered points.";
+        }
+
+        private void lblCentroidY_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTAzimuth_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Azimuth between camera coordinate system and the direction of maximal deflection of the asymmetric beam axes allocation in the far field. (see ISO-11670)";
+        }
+
+        private void lblTAzimuth_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblAzimuth_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Azimuth between camera coordinate system and the direction of maximal deflection of the asymmetric beam axes allocation in the far field. (see ISO-11670)";
+        }
+
+        private void lblAzimuth_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTDeltaX_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Horizontal (x) beam position stability. Standard deviation of the X coordinates of the considered points.";
+        }
+
+        private void lblTDeltaX_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblDeltaX_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Horizontal (x) beam position stability. Standard deviation of the X coordinates of the considered points.";
+        }
+
+        private void lblDeltaX_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTDeltaY_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Vertical (y) beam position stability. Standard deviation of the Y coordinates of the considered points.";
+        }
+
+        private void lblTDeltaY_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblDeltaY_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Vertical (y) beam position stability. Standard deviation of the Y coordinates of the considered points.";
+        }
+
+        private void lblDeltaY_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTDelta_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Beam position stability at rotational symmetry. ( Δx / Δy ⩽ 1.15 )";
+        }
+
+        private void lblTDelta_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblDelta_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Beam position stability at rotational symmetry. ( Δx / Δy ⩽ 1.15 )";
+        }
+
+        private void lblDelta_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTCount_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Number of all centroid values in the current measurement sample.";
+        }
+
+        private void lblTCount_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTotal_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Number of all centroid values in the current measurement sample."; 
+        }
+
+        private void lblTotal_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblTConsidered_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Number of centroid values considered for the stability evaluation based on the selected settings.";
+        }
+
+        private void lblTConsidered_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lblConsidered_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Number of centroid values considered for the stability evaluation based on the selected settings.";
+        }
+
+        private void lblConsidered_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void btnExport_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Export the measurement data and evaluation results to an Excel file.";
+        }
+
+        private void btnExport_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void btnClear_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Clear all loaded measurement data.";
+        }
+
+        private void btnClear_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void lvPoints_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Add data here : drag and drop CSV files, or paste text / CSV from the clipboard (Ctrl + V). Values are parsed and results update automatically.";
+        }
+
+        private void lvPoints_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void openCSVToolStripMenuItem_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Open a CSV file containing beam position data.";
+        }
+
+        private void openCSVToolStripMenuItem_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+
+        private void exportAsExcelToolStripMenuItem_MouseHover(object sender, EventArgs e)
+        {
+            slblDesc.Text = "Export the measurement data and evaluation results to an Excel file.";
+        }
+
+        private void exportAsExcelToolStripMenuItem_MouseLeave(object sender, EventArgs e)
+        {
+            SetDefaultGuideText();
+        }
+        #endregion
     }
 }
+
+
