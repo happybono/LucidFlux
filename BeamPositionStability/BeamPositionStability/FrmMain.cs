@@ -2126,7 +2126,7 @@ namespace BeamPositionStability
                 Recalculate();
                 UpdateUI();
 
-                // FitColumns도 진척도로 보여주기 (96~100)
+                // Show FitColumns as progress 96 .. 100
                 FitColumns(progress);
 
                 await Task.CompletedTask.ConfigureAwait(true);
