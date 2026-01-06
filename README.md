@@ -68,7 +68,7 @@ It supports drag-and-drop / paste of text or files containing point data, then c
 >  
 > Added DPI-aware UI sizing and contextual guide text (slblDesc) with many hover tooltips for controls / settings.
 >  
-> Adjusted control enabling logic: custom time input enabled only when timestamps exist and rbtnCustomTime is selected; custom sequence selection toggles its numeric UI.
+> Adjusted control enabling logic : custom time input enabled only when timestamps exist and rbtnCustomTime is selected; custom sequence selection toggles its numeric UI.
 >  
 > Added multi-core CSV parsing (Parallel.For) and async background operations (Task.Run) with cancellation + progress; Excel export runs on a dedicated STA thread for COM safety.
 >  
